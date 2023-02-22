@@ -152,7 +152,7 @@
         <repository>
             <id>github</id>
             <name>GitHub Packages</name>
-            <url>https://maven.pkg.github.com/dapr-sandbox/components-java-sdk</url>
+            <url>https://maven.pkg.github.com/tmacam/dapr-components-java-sdk</url>
         </repository>
     </distributionManagement>
     
