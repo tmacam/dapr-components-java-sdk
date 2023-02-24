@@ -33,7 +33,8 @@ public class OutputBindingGrpcComponentWrapper extends OutputBindingGrpc.OutputB
   }
 
   @Override
-  public void init(Bindings.OutputBindingInitRequest request, StreamObserver<Bindings.OutputBindingInitResponse> responseObserver) {
+  public void init(Bindings.OutputBindingInitRequest request,
+                   StreamObserver<Bindings.OutputBindingInitResponse> responseObserver) {
     Mono.just(request)
         .flatMap(req -> outputBinding.init(req.getMetadata().getPropertiesMap()))
         // Response is functionally and structurally equivalent to Empty, nothing to fill.
@@ -60,7 +61,8 @@ public class OutputBindingGrpcComponentWrapper extends OutputBindingGrpc.OutputB
   }
 
   @Override
-  public void listOperations(Bindings.ListOperationsRequest request, StreamObserver<Bindings.ListOperationsResponse> responseObserver) {
+  public void listOperations(Bindings.ListOperationsRequest request,
+                             StreamObserver<Bindings.ListOperationsResponse> responseObserver) {
     Mono.just(request)
         // ListOperations is an empty message, just like PingRequest. Nothing to read from it.
         .flatMap(req -> outputBinding.listOperations())

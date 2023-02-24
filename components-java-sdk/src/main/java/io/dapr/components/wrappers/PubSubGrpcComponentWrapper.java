@@ -13,11 +13,18 @@
 
 package io.dapr.components.wrappers;
 
+import dapr.proto.components.v1.Bindings;
 import dapr.proto.components.v1.PubSubGrpc;
 import dapr.proto.components.v1.Pubsub;
+import io.dapr.components.domain.bindings.ReadRequest;
+import io.dapr.components.domain.bindings.ReadResponse;
 import io.dapr.components.domain.pubsub.PubSub;
+import io.dapr.components.domain.pubsub.PublishRequest;
+import io.dapr.components.domain.pubsub.PullMessagesRequest;
+import io.dapr.components.domain.pubsub.PullMessagesResponse;
 import io.dapr.v1.ComponentProtos;
 import io.grpc.stub.StreamObserver;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.Objects;
@@ -45,7 +52,8 @@ public class PubSubGrpcComponentWrapper extends PubSubGrpc.PubSubImplBase {
   }
 
   @Override
-  public void features(ComponentProtos.FeaturesRequest request, StreamObserver<ComponentProtos.FeaturesResponse> responseObserver) {
+  public void features(ComponentProtos.FeaturesRequest request,
+                       StreamObserver<ComponentProtos.FeaturesResponse> responseObserver) {
     Mono.just(request)
         .flatMap(req -> pubSub.getFeatures())
         .map(features -> ComponentProtos.FeaturesResponse.newBuilder()
@@ -66,13 +74,35 @@ public class PubSubGrpcComponentWrapper extends PubSubGrpc.PubSubImplBase {
 
   @Override
   public void publish(Pubsub.PublishRequest request, StreamObserver<Pubsub.PublishResponse> responseObserver) {
-    super.publish(request, responseObserver);
+    Mono.just(request)
+        .map(PublishRequest::fromProto)
+        .flatMap(pubSub::publish)
+        // Response is functionally and structurally equivalent to Empty, nothing to fill.
+        .map(success -> Pubsub.PublishResponse.getDefaultInstance())
+        .subscribe(responseObserver::onNext, responseObserver::onError, responseObserver::onCompleted);
   }
 
   @Override
-  public StreamObserver<Pubsub.PullMessagesRequest> pullMessages(StreamObserver<Pubsub.PullMessagesResponse> responseObserver) {
-    // TODO
-    return super.pullMessages(responseObserver);
+  public StreamObserver<Pubsub.PullMessagesRequest> pullMessages(
+      StreamObserver<Pubsub.PullMessagesResponse> responseObserver) {
+    // First, convert the input requests to first request and acknowledgments Flux,
+    // so we can feed it to our component
+    final RequestStreamToFluxAdaptor<Pubsub.PullMessagesRequest> requestAdaptor;
+    requestAdaptor = new RequestStreamToFluxAdaptor<>((firstProto, acksProtoFlux) -> {
+      // Alright... what to do when we start receiving requests?
+      // First, let's convert those requests to the local domain.
+      final PullMessagesRequest firstRequest = PullMessagesRequest.fromProto(firstProto);
+      final Flux<PullMessagesRequest> acksFlux = acksProtoFlux.map(PullMessagesRequest::fromProto);
+
+      // Push these requests to the component...
+      pubSub.pullMessages(firstRequest, acksFlux)
+          // ... connect its response flux to the output stream from this RPC
+          .map(PullMessagesResponse::toProto)
+          .subscribe(responseObserver::onNext, responseObserver::onError, responseObserver::onCompleted);
+    });
+
+    // Finally, return the StreamObserver
+    return requestAdaptor.requestStreamObserver();
   }
 
 }

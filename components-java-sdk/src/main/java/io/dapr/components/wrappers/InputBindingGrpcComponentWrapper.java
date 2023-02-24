@@ -16,9 +16,13 @@ package io.dapr.components.wrappers;
 import dapr.proto.components.v1.Bindings;
 import dapr.proto.components.v1.InputBindingGrpc;
 import io.dapr.components.domain.bindings.InputBinding;
+import io.dapr.components.domain.bindings.ReadRequest;
+import io.dapr.components.domain.bindings.ReadResponse;
 import io.dapr.v1.ComponentProtos;
 import io.grpc.stub.StreamObserver;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 import java.util.Objects;
 
@@ -31,7 +35,8 @@ public class InputBindingGrpcComponentWrapper extends InputBindingGrpc.InputBind
   }
 
   @Override
-  public void init(Bindings.InputBindingInitRequest request, StreamObserver<Bindings.InputBindingInitResponse> responseObserver) {
+  public void init(Bindings.InputBindingInitRequest request,
+                   StreamObserver<Bindings.InputBindingInitResponse> responseObserver) {
     Mono.just(request)
         .flatMap(req -> inputBinding.init(req.getMetadata().getPropertiesMap()))
         // Response is functionally and structurally equivalent to Empty, nothing to fill.
@@ -48,9 +53,26 @@ public class InputBindingGrpcComponentWrapper extends InputBindingGrpc.InputBind
         .subscribe(responseObserver::onNext, responseObserver::onError, responseObserver::onCompleted);
   }
 
+
   @Override
   public StreamObserver<Bindings.ReadRequest> read(StreamObserver<Bindings.ReadResponse> responseObserver) {
-    // TODO
-    return super.read(responseObserver);
+    // First, convert the input requests to first request and acknowledgments Flux,
+    // so we can feed it to our component
+    final RequestStreamToFluxAdaptor<Bindings.ReadRequest> requestAdaptor;
+    requestAdaptor = new RequestStreamToFluxAdaptor<>((firstProto, acksProtoFlux) -> {
+      // Alright... what to do when we start receiving requests?
+      // First, let's convert those requests to the local domain.
+      final ReadRequest firstRequest = ReadRequest.fromProto(firstProto);
+      final Flux<ReadRequest> acksFlux = acksProtoFlux.map(ReadRequest::fromProto);
+
+      // Push these requests to the component...
+      inputBinding.read(firstRequest, acksFlux)
+          // ... connect its response flux to the output stream from this RPC
+          .map(ReadResponse::toProto)
+          .subscribe(responseObserver::onNext, responseObserver::onError, responseObserver::onCompleted);
+    });
+
+    // Finally, return the StreamObserver
+    return requestAdaptor.requestStreamObserver();
   }
 }
